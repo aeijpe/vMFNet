@@ -8,11 +8,12 @@ import random
 from models.encoder import *
 from models.decoder import *
 from models.segmentor import *
+from models.weight_init import *
 from composition.model import *
 from composition.helpers import *
 
 class CompCSD(nn.Module):
-    def __init__(self, image_channels, layer, vc_numbers, num_classes, z_length, anatomy_out_channels, vMF_kappa):
+    def __init__(self, device, image_channels, layer, vc_numbers, num_classes, z_length, anatomy_out_channels, vMF_kappa):
         super(CompCSD, self).__init__()
 
         self.image_channels = image_channels
@@ -27,11 +28,19 @@ class CompCSD(nn.Module):
         self.encoder = Encoder(self.image_channels)
         self.segmentor = Segmentor(self.anatomy_out_channels, self.num_classes, self.layer)
         self.decoder = Decoder(self.image_channels, self.anatomy_out_channels, self.layer)
+        self.device = device
 
-    def forward(self, x, layer=7):
+    def initialize(self, cp_dir, init="xavier"):
+        initialize_weights(self, init)
+        enc_dir = os.path.join(cp_dir, 'encoder')
+        kern_dir = os.path.join(cp_dir, 'kernels')
+        self.load_encoder_weights(enc_dir, self.device)
+        self.load_vmf_kernels(kern_dir)
+
+    def forward(self, x):
         kernels = self.conv1o1.weight
         features = self.encoder(x)
-        vc_activations = self.conv1o1(features[layer]) # fp*uk
+        vc_activations = self.conv1o1(features[self.layer]) # fp*uk
         vmf_activations = self.activation_layer(vc_activations) # L
         norm_vmf_activations = torch.zeros_like(vmf_activations)
         norm_vmf_activations = norm_vmf_activations.to(self.device)
@@ -43,7 +52,7 @@ class CompCSD(nn.Module):
         rec = self.decoder(decoding_features)
         pre_seg = self.segmentor(norm_vmf_activations, features)
 
-        return rec, pre_seg, features[layer], kernels, norm_vmf_activations
+        return rec, pre_seg, features[self.layer], kernels, norm_vmf_activations
 
     def load_encoder_weights(self, dir_checkpoint, device):
         self.device = device
@@ -76,5 +85,3 @@ class CompCSD(nn.Module):
             feature = torch.permute(feature, (2, 0, 1))
             features[k, :, :, :] = feature
         return features
-
-
