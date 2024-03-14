@@ -22,7 +22,7 @@ class DoubleConv(nn.Module):
         return self.double_conv(x)
 
 class Decoder(nn.Module):
-    def __init__(self, num_channels, anatomy_out_channels, layer=8):
+    def __init__(self, num_channels, layer=8):
         super(Decoder, self).__init__()
 
         self.num_channels = num_channels

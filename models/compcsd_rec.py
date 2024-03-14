@@ -12,20 +12,17 @@ from models.weight_init import *
 from composition.model import *
 from composition.helpers import *
 
-class CompCSD(nn.Module):
-    def __init__(self, device, image_channels, layer, vc_numbers, num_classes, z_length, vMF_kappa):
-        super(CompCSD, self).__init__()
+class CompCSDRec(nn.Module):
+    def __init__(self, device, image_channels, layer, vc_numbers, vMF_kappa):
+        super(CompCSDRec, self).__init__()
 
         self.image_channels = image_channels
         self.layer = layer
-        self.z_length = z_length
-        self.num_classes = num_classes
         self.vc_num = vc_numbers
 
         self.activation_layer = ActivationLayer(vMF_kappa)
 
         self.encoder = Encoder(self.image_channels)
-        self.segmentor = Segmentor(self.num_classes, self.layer)
         self.decoder = Decoder(self.image_channels, self.layer)
         self.device = device
 
@@ -49,9 +46,8 @@ class CompCSD(nn.Module):
         self.vc_activations = vc_activations
         decoding_features = self.compose(norm_vmf_activations)
         rec = self.decoder(decoding_features)
-        pre_seg = self.segmentor(norm_vmf_activations, features)
 
-        return rec, pre_seg, features[self.layer], kernels, norm_vmf_activations
+        return rec, features[self.layer], kernels, norm_vmf_activations
 
     def load_encoder_weights(self, dir_checkpoint, device):
         self.device = device

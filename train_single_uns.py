@@ -6,9 +6,9 @@ import argparse
 from tqdm import tqdm
 import logging
 from torch.utils.data import DataLoader
-from eval import eval_vmfnet
+from eval import eval_vmfnet_uns
 from mmwhs_dataloader import MMWHS_single
-from models.compcsd import CompCSD
+from models.compcsd_rec import CompCSDRec
 from composition.losses import ClusterLoss
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.model_selection import KFold
@@ -49,12 +49,12 @@ def get_args():
     return parser.parse_args()
 
 
-def train_net(train_loader, val_loader, fold, device, args, num_classes, len_train_data):
+def train_net(train_loader, val_loader, fold, device, args, len_train_data):
     best_dice = 0
     dir_checkpoint = os.path.join(args.cp, args.name)
 
     #Model selection and initialization
-    model = CompCSD(device, 1, args.layer, args.vc_num, num_classes=num_classes, z_length=8, vMF_kappa=30)
+    model = CompCSDRec(device, 1, args.layer, args.vc_num, vMF_kappa=30)
     # num_params = utils.count_parameters(model)
     # print('Model Parameters: ', num_params)
     model.initialize(dir_checkpoint, args.weight_init)
@@ -63,7 +63,6 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
     #metrics initialization
     l1_distance = nn.L1Loss().to(device)
     cluster_loss = ClusterLoss()
-    dice_loss = DiceLoss(softmax=True)
 
     #optimizer initialization
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
@@ -82,18 +81,14 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
             model.train()
             for imgs, true_masks in train_loader:
                 imgs = imgs.to(device)
-                true_masks = true_masks.to(device)
 
-                rec, pre_seg, features, kernels, L_visuals = model(imgs)
-
-                gt_oh = F.one_hot(true_masks.long().squeeze(1), num_classes=num_classes).permute(0, 3, 1, 2)
-                loss_dice = dice_loss(pre_seg, gt_oh) # CHECK DIMENSIONS
+                rec, features, kernels, L_visuals = model(imgs)
 
 
                 reco_loss = l1_distance(rec, imgs)
                 clu_loss = cluster_loss(features.detach(), kernels)
 
-                batch_loss = reco_loss + clu_loss  + loss_dice
+                batch_loss = reco_loss + clu_loss 
 
                 pbar.set_postfix(**{'loss (batch)': batch_loss.item()})
 
@@ -102,31 +97,9 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
                 nn.utils.clip_grad_value_(model.parameters(), 0.1)
                 optimizer.step()
 
-                compact_pred_b = torch.argmax(pre_seg, dim=1).unsqueeze(1)
-
                 writer.add_scalar('loss/batch_loss', batch_loss.item(), global_step)
                 writer.add_scalar('loss/reco_loss', reco_loss.item(), global_step)
-                writer.add_scalar('loss/loss_dice', loss_dice.item(), global_step)
                 writer.add_scalar('loss/cluster_loss', clu_loss.item(), global_step)
-
-                if global_step % ((len_train_data//args.bs) // 2) == 0:
-                    writer.add_images('images/train', imgs, global_step, dataformats='NCHW')
-                    writer.add_images('images/train_reco', rec, global_step, dataformats='NCHW')
-                    writer.add_images('images/train_true', true_masks, global_step, dataformats='NCHW')
-                    writer.add_images('images/train_pred', compact_pred_b, global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_1', L_visuals[:,0,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_2', L_visuals[:,1,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_3', L_visuals[:,2,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_4', L_visuals[:,3,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_5', L_visuals[:,4,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_6', L_visuals[:,5,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_7', L_visuals[:,6,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_8', L_visuals[:,7,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_9', L_visuals[:,8,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_10', L_visuals[:,9,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_11', L_visuals[:,10,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_12', L_visuals[:,11,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-
 
                 pbar.update(imgs.shape[0])
 
@@ -137,7 +110,7 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
 
             #if (epoch + 1) > args.k1 and (epoch + 1) % args.k2 == 0:
             if epoch % 5 == 0:
-                val_score, imgs, rec, test_true, test_pred, _ = eval_vmfnet(model, val_loader, device, args.layer)
+                val_score, imgs, rec, test_true, test_pred, L_visuals = eval_vmfnet_uns(model, val_loader, device)
              
                 scheduler.step(val_score)
                 writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], epoch)
@@ -150,6 +123,19 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
                 writer.add_images('Val_images/test_reco', rec, epoch, dataformats='NCHW')
                 writer.add_images('Val_images/test_true', test_true, epoch, dataformats='NCHW')
                 writer.add_images('Val_images/test_pred', test_pred, epoch, dataformats='NCHW')
+
+                writer.add_images('L_visuals/L_1', L_visuals[:,0,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_2', L_visuals[:,1,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_3', L_visuals[:,2,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_4', L_visuals[:,3,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_5', L_visuals[:,4,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_6', L_visuals[:,5,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_7', L_visuals[:,6,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_8', L_visuals[:,7,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_9', L_visuals[:,8,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_10', L_visuals[:,9,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_11', L_visuals[:,10,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals/L_12', L_visuals[:,11,:,:].unsqueeze(1), epoch, dataformats='NCHW')
 
 
                 if best_dice < val_score:

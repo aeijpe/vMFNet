@@ -23,6 +23,7 @@ def get_args():
     parser.add_argument('-c', '--cp', type=str, default='checkpoints', help='The name of the checkpoints.')
     parser.add_argument('-t', '--tv', type=str, default='A', help='The name of the checkpoints.')
     parser.add_argument('-mn', '--model_name', type=str, default='unet', help='Name of the model architecture to be used for training/testing.')
+    parser.add_argument('--data_dir',  type=str, default='../data/other/MR_withGT_proc/annotated/', help='The name of the checkpoints.')
 
     parser.add_argument('--vc_num', type=int,  default=12, help='Kernel/distributions amount')
 
@@ -36,10 +37,8 @@ def main(args):
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	dir_checkpoint = os.path.join(args.cp, "encoder")
 
-
-
 	extractor = UNet(n_classes=1)
-	extractor.load_state_dict(torch.load(dir_checkpoint+'UNet.pth', map_location=device))
+	extractor.load_state_dict(torch.load(os.path.join(dir_checkpoint, 'UNet.pth'), map_location=device))
 	extractor.to(device)
 	extractor.eval()
 
@@ -51,7 +50,6 @@ def main(args):
 	vMF_kappa= 30 # kernel variance
 
 	# initialization save directory
-	# init_path = 'A_kernels/init_unet/'
 	init_path = os.path.join(kernels_save_dir, 'init/')
 	if not os.path.exists(init_path):
 		os.makedirs(init_path)
@@ -72,14 +70,14 @@ def main(args):
 	offset = 3
 	######################################################################################
 
-	total_images = 10000 # number of image for vMF kernels learning
-	samp_size_per_img = 500 # number of positions in hxw
+	total_images = 10000 # number of image for vMF kernels learning --> we only have 288
+	samp_size_per_img = 15000 # number of positions in hxw --> they had 500 --> 5.000.000 in total, we have 4.320.000
 
-	########################################### load the images, all images are for one label
+	########################################### load the train images
 	cases = range(0,18)
 	dataset_train = MMWHS_single(args, cases)
 	train_loader = DataLoader(dataset_train, batch_size=1, shuffle=True, num_workers=4)
-	n_train = dataset_train.__len__()
+	n_train = dataset_train.__len__() #288
 	######################################################################################
 
 
@@ -87,66 +85,62 @@ def main(args):
 	feat_set = []
 	imgs_list = []
 	nfeats = 0
-	for ii,data in enumerate(train_loader):
+	for ii, data in enumerate(train_loader):
 		input, _ = data
-		if np.mod(ii,500)==0:
-			print('{} / {}'.format(ii,n_train))
 
 		if ii < total_images:
 		# extract the features using the extractor
 			with torch.no_grad():
-				tmp = extractor(input.to(device))[layer].squeeze(0).detach().cpu().numpy() 
-
-			print("tmp shape: ", tmp.shape)
+				tmp = extractor(input.to(device))[layer].squeeze(0).detach().cpu().numpy() # 64, 256, 256
 
 			# feature height and width
 			height, width = tmp.shape[1:3]
-			print("height: ", height)
-			print("width: ", width)
 
 			# trunk the features by cutting the outter 3 pixels
-			tmp = tmp[:,offset:height - offset, offset:width - offset]
+			tmp = tmp[:,offset:height - offset, offset:width - offset] # 64, 250, 250
+			
 			# dxhxw -> dxhw, d is the number of channels
-			gtmp = tmp.reshape(tmp.shape[0], -1) # 128, 72x72
-			# randomly sample 20 feature vector per sample
+			gtmp = tmp.reshape(tmp.shape[0], -1) # 64, 62500
+
+			# randomly sample 500 feature vectors per sample
 			if gtmp.shape[1] >= samp_size_per_img:
 				rand_idx = np.random.permutation(gtmp.shape[1])[:samp_size_per_img]
 			else:
 				rand_idx = np.random.permutation(gtmp.shape[1])[:samp_size_per_img - gtmp.shape[1]]
-					#rand_idx = np.append(range(gtmp.shape[1]), rand_idx)
+
+			
 			# transpose the feature vectors, now the dimension is nxd, n is 20
-			tmp_feats = gtmp[:, rand_idx].T # 1000, 128
+			tmp_feats = gtmp[:, rand_idx].T # 15000, 64
 
 			cnt = 0
-		for rr in rand_idx:
-			# find the localization of the feature vector
-			ihi, iwi = np.unravel_index(rr, (height - 2 * offset, width - 2 * offset))
-			# original localization of feature vector -> ihi+offset
-			# input.shape[2]/height -> downsampling scale
-			# Apad -> number of padding pixels
-			hi = (ihi+offset)*(input.shape[2]/height)-Apad
-			wi = (iwi + offset)*(input.shape[3]/width)-Apad
-			# save the localization of category of the image, index of the image, receptive field of the feature vector
-			loc_set.append([ii, hi,wi,hi+Arf,wi+Arf]) # index of image, x,y and x+arf,y+arf
+			for rr in rand_idx:
+				# find the localization of the feature vector
+				ihi, iwi = np.unravel_index(rr, (height - 2 * offset, width - 2 * offset))
+				# original localization of feature vector -> ihi+offset
+				# input.shape[2]/height -> downsampling scale
+				# Apad -> number of padding pixels
+				hi = (ihi+offset)*(input.shape[2]/height)-Apad
+				wi = (iwi + offset)*(input.shape[3]/width)-Apad
+				# save the localization of category of the image, index of the image, receptive field of the feature vector
+				loc_set.append([ii, hi,wi,hi+Arf,wi+Arf]) # index of image, x,y and x+arf,y+arf
+				# list of all feature vectors
+				feat_set.append(tmp_feats[cnt,:])
+				cnt+=1
+			imgs_list.append(input.squeeze(0).squeeze(0).detach().cpu().numpy())
 
-			# list of all feature vectors
-			feat_set.append(tmp_feats[cnt,:])
-			cnt+=1
-		imgs_list.append(input.squeeze(0).squeeze(0).detach().cpu().numpy())
+	feat_set = np.asarray(feat_set) # images*15000, 64
+	loc_set = np.asarray(loc_set).T # 64, images*15000
 
-	feat_set = np.asarray(feat_set)
-	loc_set = np.asarray(loc_set).T
-
-	print(feat_set.shape) # 2562000, 128
-	print(loc_set.shape) # 5, 2562000
 	model = vMFMM(args.vc_num, 'k++')
 	model.fit(feat_set, vMF_kappa, max_it=150)
 
 	# save the initialized mu, nxk, dict_dir = kernels/init_unet/
 	with open(dict_dir+'dictionary_{}.pickle'.format(args.vc_num), 'wb') as fh:
 		pickle.dump(model.mu, fh)
+	
+	# model.mu == [12, 64]
 
-	##################################### work on the following
+	##################################### work on the following -> visualization of the clusters
 
 	num = 50
 	SORTED_IDX = []
@@ -155,15 +149,15 @@ def main(args):
 	for vc_i in range(args.vc_num):
 	# p: nxk
 	# for every kernel, get the 50 feature vectors with minimal distances
-	sort_idx = np.argsort(-model.p[:, vc_i])[0:num]
-	SORTED_IDX.append(sort_idx)
-	tmp=[]
-	for idx in range(num):
-		###################################### change here to extract the localizations
-		iloc = loc_set[:, sort_idx[idx]]
-		tmp.append(iloc)
-	# get the localization of receptive field for the 50 feature vectors for each kernel
-	SORTED_LOC.append(tmp)
+		sort_idx = np.argsort(-model.p[:, vc_i])[0:num]
+		SORTED_IDX.append(sort_idx)
+		tmp=[]
+		for idx in range(num):
+			###################################### change here to extract the localizations
+			iloc = loc_set[:, sort_idx[idx]]
+			tmp.append(iloc)
+		# get the localization of receptive field for the 50 feature vectors for each kernel
+		SORTED_LOC.append(tmp)
 
 	# save the distances, too large, more than 4Gb
 	# with open(dict_dir + 'dictionary_{}_p.pickle'.format(vc_num), 'wb') as fh:
@@ -171,65 +165,65 @@ def main(args):
 	# p = model.p
 
 	print('save top {0} images for each cluster'.format(num))
-	example = [None for vc_i in range(vc_num)] # 512 None
-	out_dir = dict_dir + '/cluster_images_{}/'.format(vc_num) # 512 forlders
+	example = [None for vc_i in range(args.vc_num)] # 512 None
+	out_dir = dict_dir + '/cluster_images_{}/'.format(args.vc_num) # 512 forlders
 	if not os.path.exists(out_dir):
-	os.makedirs(out_dir)
+		os.makedirs(out_dir)
 
 	print('')
 
 	# save the 50 images for each kernel
-	for vc_i in range(vc_num):
-	# receptive field**2 and 1 channels, 50 images
-	patch_set = np.zeros(((Arf**2)*1, num)).astype('uint8')
-	# index for each kernel
-	sort_idx = SORTED_IDX[vc_i]#np.argsort(-p[:,vc_i])[0:num]
-	opath = out_dir + str(vc_i) + '/'
-	if not os.path.exists(opath):
-		os.makedirs(opath)
-	locs=[]
-	for idx in range(num):
-		iloc = loc_set[:,sort_idx[idx]]
-		loc = iloc[0:5].astype(int)
-		if not loc[0] in locs:
-			locs.append(loc[0])
-			# img = cv2.imread(imgs[int(loc[0])])
-			img = imgs_list[int(loc[0])]
-			img *= 255
-			patch = img[loc[1]:loc[3], loc[2]:loc[4]]
-			#patch_set[:,idx] = patch.flatten()
-			if patch.size:
-				cv2.imwrite(opath+str(idx)+'.JPEG',patch)
-	#example[vc_i] = np.copy(patch_set)
-	if vc_i%10 == 0:
-		print(vc_i)
+	for vc_i in range(args.vc_num):
+		# receptive field**2 and 1 channels, 50 images
+		patch_set = np.zeros(((Arf**2)*1, num)).astype('uint8')
+		# index for each kernel
+		sort_idx = SORTED_IDX[vc_i]#np.argsort(-p[:,vc_i])[0:num]
+		opath = out_dir + str(vc_i) + '/'
+		if not os.path.exists(opath):
+			os.makedirs(opath)
+		locs=[]
+		for idx in range(num):
+			iloc = loc_set[:,sort_idx[idx]]
+			loc = iloc[0:5].astype(int)
+			if not loc[0] in locs:
+				locs.append(loc[0])
+				# img = cv2.imread(imgs[int(loc[0])])
+				img = imgs_list[int(loc[0])]
+				img *= 255
+				patch = img[loc[1]:loc[3], loc[2]:loc[4]]
+				#patch_set[:,idx] = patch.flatten()
+				if patch.size:
+					cv2.imwrite(opath+str(idx)+'.JPEG',patch)
+		#example[vc_i] = np.copy(patch_set)
+		if vc_i%10 == 0:
+			print(vc_i)
 
 	# print summary for each vc
 	#if layer=='pool4' or layer =='last': # somehow the patches seem too big for p5
-	for c in range(vc_num):
-	iidir = out_dir + str(c) +'/'
-	files = glob.glob(iidir+'*.JPEG')
-	width = 100
-	height = 100
-	canvas = np.zeros((0,4*width,3))
-	cnt = 0
-	for jj in range(4):
-		row = np.zeros((height,0,3))
-		ii=0
-		tries=0
-		next=False
-		for ii in range(4):
-			if (jj*4+ii)< len(files):
-				img_file = files[jj*4+ii]
-				if os.path.exists(img_file):
-					img = cv2.imread(img_file)
-				img = cv2.resize(img, (width,height))
-			else:
-				img = np.zeros((height, width, 3))
-			row = np.concatenate((row, img), axis=1)
-		canvas = np.concatenate((canvas,row),axis=0)
+	for c in range(args.vc_num):
+		iidir = out_dir + str(c) +'/'
+		files = glob.glob(iidir+'*.JPEG')
+		width = 100
+		height = 100
+		canvas = np.zeros((0,4*width,3))
+		cnt = 0
+		for jj in range(4):
+			row = np.zeros((height,0,3))
+			ii=0
+			tries=0
+			next=False
+			for ii in range(4):
+				if (jj*4+ii)< len(files):
+					img_file = files[jj*4+ii]
+					if os.path.exists(img_file):
+						img = cv2.imread(img_file)
+					img = cv2.resize(img, (width,height))
+				else:
+					img = np.zeros((height, width, 3))
+				row = np.concatenate((row, img), axis=1)
+			canvas = np.concatenate((canvas,row),axis=0)
 
-	cv2.imwrite(out_dir+str(c)+'.JPEG',canvas)
+		cv2.imwrite(out_dir+str(c)+'.JPEG',canvas)
 
 
 
