@@ -14,7 +14,6 @@ from torch.utils.tensorboard import SummaryWriter
 from sklearn.model_selection import KFold
 import pytorch_lightning as pl
 
-from monai.losses import DiceLoss
 import torch.nn.functional as F
 import glob
 
@@ -32,15 +31,14 @@ def get_args():
     parser.add_argument('--seed', default=42, type=int,help='Seed to use for reproducing results') # --> their default was 14
     parser.add_argument('--bs', type= int, default=4, help='Number of inputs per batch')
     parser.add_argument('-c', '--cp', type=str, default='checkpoints', help='The name of the checkpoints.')
-    parser.add_argument('-n','--name', type=str, default='test', help='The name of this train/test. Used when storing information.')
-    parser.add_argument('-mn','--model_name', type=str, default='compcsd', help='Name of the model architecture to be used for training/testing.')
+    parser.add_argument('--name', type=str, default='test', help='The name of this train/test. Used when storing information.')
     parser.add_argument('-lr','--learning_rate', type=float, default='0.0001', help='The learning rate for model training')
     parser.add_argument('-wi','--weight_init', type=str, default="xavier", help='Weight initialization method, or path to weights file (for fine-tuning or continuing training)')
     parser.add_argument('--k1', type=int,  default=40, help='When the learning rate starts decaying')
     parser.add_argument('--k2', type=int,  default=4, help='Check decay learning')
     parser.add_argument('--layer', type=int,  default=8, help='layer from which the deepf eatures are obtained')
     parser.add_argument('--vc_num', type=int,  default=12, help='Kernel/distributions amount')
-    parser.add_argument('--data_dir',  type=str, default='../data/other/MR_withGT_proc/annotated/', help='The name of the checkpoints.')
+    parser.add_argument('--data_dir',  type=str, default='../data/other/CT_withGT_proc/annotated/', help='The name of the checkpoints.')
     parser.add_argument('--pred', type=str, default='MYO', help='Segmentation task')
     parser.add_argument('--k_folds', type= int, default=5, help='Cross validation')
 
@@ -50,7 +48,7 @@ def get_args():
 
 
 def train_net(train_loader, val_loader, fold, device, args, len_train_data):
-    best_dice = 0
+    best_score = 1000000
     dir_checkpoint = os.path.join(args.cp, args.name)
 
     #Model selection and initialization
@@ -110,36 +108,32 @@ def train_net(train_loader, val_loader, fold, device, args, len_train_data):
 
             #if (epoch + 1) > args.k1 and (epoch + 1) % args.k2 == 0:
             if epoch % 5 == 0:
-                val_score, imgs, rec, test_true, test_pred, L_visuals = eval_vmfnet_uns(model, val_loader, device)
+                val_score, imgs, rec, L_visuals = eval_vmfnet_uns(model, val_loader, device)
              
                 scheduler.step(val_score)
                 writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], epoch)
 
-                logging.info('Validation Dice Coeff: {}'.format(val_score))
+                writer.add_scalar('L1_dist/val', val_score, epoch)
 
-                writer.add_scalar('Dice/val', val_score, epoch)
+                writer.add_images('Val_images/image_true', imgs, epoch, dataformats='NCHW')
+                writer.add_images('Val_images/image_rec', rec, epoch, dataformats='NCHW')
 
-                writer.add_images('Val_images/test', imgs, epoch, dataformats='NCHW')
-                writer.add_images('Val_images/test_reco', rec, epoch, dataformats='NCHW')
-                writer.add_images('Val_images/test_true', test_true, epoch, dataformats='NCHW')
-                writer.add_images('Val_images/test_pred', test_pred, epoch, dataformats='NCHW')
-
-                writer.add_images('L_visuals/L_1', L_visuals[:,0,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_2', L_visuals[:,1,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_3', L_visuals[:,2,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_4', L_visuals[:,3,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_5', L_visuals[:,4,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_6', L_visuals[:,5,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_7', L_visuals[:,6,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_8', L_visuals[:,7,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_9', L_visuals[:,8,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_10', L_visuals[:,9,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_11', L_visuals[:,10,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals/L_12', L_visuals[:,11,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_1', L_visuals[:,0,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_2', L_visuals[:,1,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_3', L_visuals[:,2,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_4', L_visuals[:,3,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_5', L_visuals[:,4,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_6', L_visuals[:,5,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_7', L_visuals[:,6,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_8', L_visuals[:,7,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_9', L_visuals[:,8,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_10', L_visuals[:,9,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_11', L_visuals[:,10,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                writer.add_images('L_visuals_val/L_12', L_visuals[:,11,:,:].unsqueeze(1), epoch, dataformats='NCHW')
 
 
-                if best_dice < val_score:
-                    best_dice = val_score
+                if val_score < best_score:
+                    best_score = val_score
                     print("Epoch checkpoint")
                     save_dir = os.path.join(dir_checkpoint, f'fold_{fold}')
                     os.makedirs(save_dir, exist_ok=True)
@@ -155,8 +149,9 @@ def train_net(train_loader, val_loader, fold, device, args, len_train_data):
                         except OSError as e:
                             print(f"Error deleting file {file_path}: {e}")
                     
-                    torch.save(model.state_dict(), os.path.join(save_dir, f'CP_epoch_{epoch}_dice_{val_score}.pth'))
+                    torch.save(model.state_dict(), os.path.join(save_dir, f'CP_epoch_{epoch}_recloss_{val_score}.pth'))
                     logging.info('Checkpoint saved !')
+
 
             
     writer.close()
@@ -167,10 +162,8 @@ def main(args):
 
     if args.pred == "MYO":
         labels = [1, 0, 0, 0, 0, 0, 0]
-        num_classes = 2
     else:
         labels = [1, 2, 3, 4, 5, 6, 7]
-        num_classes = 8
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cases = range(0,18)
@@ -179,9 +172,6 @@ def main(args):
     
  
     for fold_train, fold_val in kf.split(cases):
-        if fold == 0:
-            fold += 1
-            continue
         print('Train fold:', fold_train)
         print('Val fold:', fold_val)
         print("loading train data")
@@ -192,7 +182,7 @@ def main(args):
         val_loader = DataLoader(dataset_val, batch_size=args.bs, drop_last=True, num_workers=4)
         len_train_data = dataset_train.__len__()
 
-        train_net(train_loader, val_loader, fold, device, args, num_classes, len_train_data) 
+        train_net(train_loader, val_loader, fold, device, args, len_train_data) 
         fold += 1
 
 

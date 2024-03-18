@@ -43,7 +43,7 @@ def get_args():
 def pretrain_fe(args):
     pl.seed_everything(args.seed)
 
-    cp_dir = os.path.join(args.cp, "encoder")
+    cp_dir = os.path.join(args.cp, os.path.join(args.name, 'encoder'))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cases = range(0,18)

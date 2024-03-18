@@ -23,7 +23,7 @@ class Segmentor(nn.Module):
 
         self.outc = OutConv(64, self.num_classes)
 
-    def forward(self, content, features):
+    def forward(self, content, features=None):
         
         out = self.conv1(content)
         out = self.up4(out)

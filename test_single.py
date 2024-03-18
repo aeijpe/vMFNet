@@ -40,9 +40,7 @@ def get_args():
     parser.add_argument('--data_dir',  type=str, default='../data/other/MR_withGT_proc/annotated/', help='The name of the checkpoints.')
     parser.add_argument('--pred', type=str, default='MYO', help='Segmentation task')
     parser.add_argument('--k_folds', type= int, default=5, help='Cross validation')
-
-
-
+    parser.add_argument('--mod', type=str, default='MRI')
     return parser.parse_args()
 
 
@@ -58,24 +56,24 @@ def test(model_file, log_dir, data_loader, device, num_classes, cp_dir):
     writer = SummaryWriter(log_dir=log_dir)
     dc_score, imgs, rec, test_true, test_pred, L_visuals = eval_vmfnet(model, data_loader, device)
     
-    writer.add_scalar('Dice/test_MRI', dc_score, 0)
+    writer.add_scalar('Dice/test_{args.mod}', dc_score, 0)
 
-    writer.add_images('Test_images/test_MRI', imgs, 0, dataformats='NCHW')
-    writer.add_images('Test_images/test_reco_MRI', rec, 0, dataformats='NCHW')
-    writer.add_images('Test_images/test_true_MRI', test_true, 0, dataformats='NCHW')
-    writer.add_images('Test_images/test_pred_MRI', test_pred, 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_1_MRI', L_visuals[:,0,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_2_MRI', L_visuals[:,1,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_3_MRI', L_visuals[:,2,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_4_MRI', L_visuals[:,3,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_5_MRI', L_visuals[:,4,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_6_MRI', L_visuals[:,5,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_7_MRI', L_visuals[:,6,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_8_MRI', L_visuals[:,7,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_9_MRI', L_visuals[:,8,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_10_MRI', L_visuals[:,9,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_11_MRI', L_visuals[:,10,:,:].unsqueeze(1), 0, dataformats='NCHW')
-    writer.add_images('L_visuals/L_12_MRI', L_visuals[:,11,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'Test_images/image_{args.mod}', imgs, 0, dataformats='NCHW')
+    writer.add_images(f'Test_images/image_reco_{args.mod}', rec, 0, dataformats='NCHW')
+    writer.add_images(f'Test_images/mask_true_{args.mod}', test_true, 0, dataformats='NCHW')
+    writer.add_images(f'Test_images/mask_pred_{args.mod}', test_pred, 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_1_{args.mod}', L_visuals[:,0,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_2_{args.mod}', L_visuals[:,1,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_3_{args.mod}', L_visuals[:,2,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_4_{args.mod}', L_visuals[:,3,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_5_{args.mod}', L_visuals[:,4,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_6_{args.mod}', L_visuals[:,5,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_7_{args.mod}', L_visuals[:,6,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_8_{args.mod}', L_visuals[:,7,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_9_{args.mod}', L_visuals[:,8,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_10_{args.mod}', L_visuals[:,9,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_11_{args.mod}', L_visuals[:,10,:,:].unsqueeze(1), 0, dataformats='NCHW')
+    writer.add_images(f'L_visuals/L_12_{args.mod}', L_visuals[:,11,:,:].unsqueeze(1), 0, dataformats='NCHW')
 
     return dc_score
     
@@ -106,8 +104,6 @@ def main(args):
     pretrained_found = False
 
     for it, model_file in enumerate(pretrained_filenames):
-        if it == 2:
-            continue
         print(f"Testing model {it+1}/{len(pretrained_filenames)}")
         log_dir_fold = os.path.join(log_dir, f"fold_{it}")
         print("log_dir: ", log_dir_fold)

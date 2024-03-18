@@ -44,8 +44,6 @@ def get_args():
     parser.add_argument('--pred', type=str, default='MYO', help='Segmentation task')
     parser.add_argument('--k_folds', type= int, default=5, help='Cross validation')
 
-
-
     return parser.parse_args()
 
 
@@ -102,31 +100,10 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
                 nn.utils.clip_grad_value_(model.parameters(), 0.1)
                 optimizer.step()
 
-                compact_pred_b = torch.argmax(pre_seg, dim=1).unsqueeze(1)
-
                 writer.add_scalar('loss/batch_loss', batch_loss.item(), global_step)
                 writer.add_scalar('loss/reco_loss', reco_loss.item(), global_step)
                 writer.add_scalar('loss/loss_dice', loss_dice.item(), global_step)
                 writer.add_scalar('loss/cluster_loss', clu_loss.item(), global_step)
-
-                if global_step % ((len_train_data//args.bs) // 2) == 0:
-                    writer.add_images('images/train', imgs, global_step, dataformats='NCHW')
-                    writer.add_images('images/train_reco', rec, global_step, dataformats='NCHW')
-                    writer.add_images('images/train_true', true_masks, global_step, dataformats='NCHW')
-                    writer.add_images('images/train_pred', compact_pred_b, global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_1', L_visuals[:,0,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_2', L_visuals[:,1,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_3', L_visuals[:,2,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_4', L_visuals[:,3,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_5', L_visuals[:,4,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_6', L_visuals[:,5,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_7', L_visuals[:,6,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_8', L_visuals[:,7,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_9', L_visuals[:,8,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_10', L_visuals[:,9,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_11', L_visuals[:,10,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-                    writer.add_images('L_visuals/L_12', L_visuals[:,11,:,:].unsqueeze(1), global_step, dataformats='NCHW')
-
 
                 pbar.update(imgs.shape[0])
 
@@ -137,7 +114,7 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
 
             #if (epoch + 1) > args.k1 and (epoch + 1) % args.k2 == 0:
             if epoch % 5 == 0:
-                val_score, imgs, rec, test_true, test_pred, _ = eval_vmfnet(model, val_loader, device, args.layer)
+                val_score, imgs, rec, test_true, test_pred, L_visuals = eval_vmfnet(model, val_loader, device, args.layer)
              
                 scheduler.step(val_score)
                 writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], epoch)
@@ -150,6 +127,20 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
                 writer.add_images('Val_images/test_reco', rec, epoch, dataformats='NCHW')
                 writer.add_images('Val_images/test_true', test_true, epoch, dataformats='NCHW')
                 writer.add_images('Val_images/test_pred', test_pred, epoch, dataformats='NCHW')
+
+                if epoch % 10 == 0:
+                    writer.add_images(f'L_visuals_val/L_1_val', L_visuals[:,0,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_2_val', L_visuals[:,1,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_3_val', L_visuals[:,2,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_4_val', L_visuals[:,3,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_5_val', L_visuals[:,4,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_6_val', L_visuals[:,5,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_7_val', L_visuals[:,6,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_8_val', L_visuals[:,7,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_9_val', L_visuals[:,8,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_10_val', L_visuals[:,9,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_11_val', L_visuals[:,10,:,:].unsqueeze(1), epoch, dataformats='NCHW')
+                    writer.add_images(f'L_visuals_val/L_12_val', L_visuals[:,11,:,:].unsqueeze(1), epoch, dataformats='NCHW')
 
 
                 if best_dice < val_score:
@@ -168,6 +159,9 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
                             print(f"Deleted old model file: {file_path}")
                         except OSError as e:
                             print(f"Error deleting file {file_path}: {e}")
+                    
+
+                    
                     
                     torch.save(model.state_dict(), os.path.join(save_dir, f'CP_epoch_{epoch}_dice_{val_score}.pth'))
                     logging.info('Checkpoint saved !')
@@ -193,9 +187,6 @@ def main(args):
     
  
     for fold_train, fold_val in kf.split(cases):
-        if fold == 0:
-            fold += 1
-            continue
         print('Train fold:', fold_train)
         print('Val fold:', fold_val)
         print("loading train data")

@@ -24,7 +24,7 @@ def get_args():
     parser.add_argument('-t', '--tv', type=str, default='A', help='The name of the checkpoints.')
     parser.add_argument('-mn', '--model_name', type=str, default='unet', help='Name of the model architecture to be used for training/testing.')
     parser.add_argument('--data_dir',  type=str, default='../data/other/MR_withGT_proc/annotated/', help='The name of the checkpoints.')
-
+    parser.add_argument('--name', type=str, default='test', help='The name of this train/test. Used when storing information.')
     parser.add_argument('--vc_num', type=int,  default=12, help='Kernel/distributions amount')
 
     return parser.parse_args()
@@ -35,7 +35,8 @@ def main(args):
 	######################################################################################
 	###################################### load the extractor
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	dir_checkpoint = os.path.join(args.cp, "encoder")
+	dir_instance = os.path.join(args.cp, args.name)
+	dir_checkpoint = os.path.join(dir_instance, "encoder")
 
 	extractor = UNet(n_classes=1)
 	extractor.load_state_dict(torch.load(os.path.join(dir_checkpoint, 'UNet.pth'), map_location=device))
@@ -45,7 +46,7 @@ def main(args):
 	######################################################################################
 	# Setup work
 	###################################### change the directories
-	kernels_save_dir = os.path.join(args.cp, 'kernels')
+	kernels_save_dir = os.path.join(dir_instance, 'kernels')
 
 	vMF_kappa= 30 # kernel variance
 
