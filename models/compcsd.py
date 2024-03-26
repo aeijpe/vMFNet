@@ -18,7 +18,7 @@ from composition.losses import ClusterLoss
 from losses import *
 
 class CompCSD(nn.Module):
-    def __init__(self, device, image_channels, layer, vc_numbers, num_classes, vMF_kappa, z_length=None):
+    def __init__(self, device, image_channels, layer, vc_numbers, num_classes, z_length, vMF_kappa):
         super(CompCSD, self).__init__()
 
         self.image_channels = image_channels
@@ -30,7 +30,7 @@ class CompCSD(nn.Module):
         self.activation_layer = ActivationLayer(vMF_kappa)
 
         self.encoder = Encoder(self.image_channels)
-        self.segmentor = Segmentor(self.num_classes, self.layer)
+        self.segmentor = Segmentor(self.num_classes, self.vc_num, self.layer)
         self.decoder = Decoder(self.image_channels, self.layer)
         self.device = device
 
@@ -38,6 +38,8 @@ class CompCSD(nn.Module):
         initialize_weights(self, init)
         enc_dir = os.path.join(cp_dir, 'encoder/UNet.pth')
         kern_dir = os.path.join(cp_dir, 'kernels/init/dictionary/dictionary_12.pickle')
+        print(enc_dir)
+        print(kern_dir)
         self.load_encoder_weights(enc_dir, self.device)
         self.load_vmf_kernels(kern_dir)
 
@@ -162,6 +164,14 @@ class CompCSDRec(nn.Module):
     def load_vmf_kernels(self, dict_dir):
         weights = getVmfKernels(dict_dir, self.device)
         self.conv1o1 = Conv1o1Layer(weights, self.device)
+
+    
+    def get_xavier_kernels(self):
+        weights = torch.zeros([self.vc_num, 64, 1, 1]).type(torch.FloatTensor)
+        weights = weights.to(self.device)
+        nn.init.xavier_normal_(weights)
+        self.conv1o1 = Conv1o1Layer(weights, self.device)
+
 
     def compose(self, vmf_activations):
         kernels = self.conv1o1.weight #[512, 128, 1, 1]

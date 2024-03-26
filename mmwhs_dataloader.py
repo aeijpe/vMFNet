@@ -33,6 +33,11 @@ class MMWHS(Dataset):
     self.target_size = len(self.images_target)
     self.dataset_size = max(self.source_size, self.target_size)
 
+    if self.target_size is not self.source_size:
+      print("something is wrong here")
+      print(self.target_size)
+      print(self.source_size)
+
 
     self.transforms_seg = Compose(
             [

@@ -73,41 +73,38 @@ def eval_vmfnet_mm(model, loader, device, layer=8):
     """Evaluation with reconstruction performance"""
     model.eval()
     n_val = len(loader)  # the number of batch
-    l1 = 0
-    clu = 0
-    dsc = 0
     display_itr = 0
-    l1_distance = nn.L1Loss().to(device)
-    clu_loss = ClusterLoss()
+    
+    metrics_dict_total = {'Source/reco_loss': 0, 'Source/cluster_loss': 0, 'Source/dice_loss': 0,
+                        'Target/reco_loss': 0, 'Target/cluster_loss': 0, 'Target/dice_loss': 0,
+                        'kl_loss': 0, 'DSC_Target': 0, 'DSC_Source':0}
 
     with tqdm(total=n_val, desc='Validation round', unit='batch', leave=False) as pbar:
         for img_s, label_s, img_t, label_t in loader:
             img_s = img_s.to(device)
             img_t = img_t.to(device)
+            label_s = label_s.to(device)
             label_t = label_t.to(device)
 
             with torch.no_grad():
-                pre_seg, rec, features_t, kernels, norm_vmf_activations_t, norm_vmf_activations_s, features_s  = model.forward_eval(img_s, img_t)
+                metrics_dict, images_dict, visuals_dict  = model.forward_eval(img_s, img_t, label_s, label_t)
 
-            l1 += l1_distance(rec, img_t).item()
-            clu += clu_loss(features_t.detach(), kernels).item()
-
-            compact_pred_b = torch.argmax(pre_seg, dim=1).unsqueeze(1)
-            dsc += dice(label_t, compact_pred_b, model.num_classes)
+            for key, value in metrics_dict.items():
+                metrics_dict_total[key] += value
 
             if display_itr == 5:
-                show_imgs = img_t
-                show_rec = rec
-                show_vis_target = norm_vmf_activations_t
-                show_vis_source = norm_vmf_activations_s
-                true_label = label_t
-                pred_label = compact_pred_b
-            
+                image_dict_show = images_dict
+                visual_dict_show = visuals_dict
+                
             display_itr += 1
             pbar.update()
-    
-    
-    return l1 / n_val, clu / n_val, dsc / n_val , show_imgs, show_rec, true_label, pred_label, show_vis_source, show_vis_target
 
-
+    for key, value in metrics_dict.items():
+        metrics_dict_total[key] /= n_val
+    
+    #model.scheduler_content.step(metrics_dict_total['kl_loss'])
+    model.scheduler_source.step(metrics_dict_total['Source/reco_loss'] + metrics_dict_total['Source/cluster_loss'] + metrics_dict_total['Source/dice_loss'])
+    model.scheduler_target.step(metrics_dict_total['Target/reco_loss'] + metrics_dict_total['Target/cluster_loss'])
+    
+    return metrics_dict, image_dict_show, visual_dict_show
 

@@ -6,15 +6,13 @@ import torch
 
 
 class Segmentor(nn.Module):
-    def __init__(self, num_classes, layer=8, bilinear=True):
+    def __init__(self, num_classes, vc_num_seg=2, layer=8):
         super(Segmentor, self).__init__()
-
-        self.anatomy_out_channels = 0
         self.num_classes = num_classes
         self.layer = layer
 
         
-        input_channels =  12 
+        input_channels =  vc_num_seg
         out_channels = 64
 
         self.conv1 = DoubleConv(input_channels, out_channels)
@@ -23,7 +21,7 @@ class Segmentor(nn.Module):
 
         self.outc = OutConv(64, self.num_classes)
 
-    def forward(self, content, features=None):
+    def forward(self, content):
         
         out = self.conv1(content)
         out = self.up4(out)

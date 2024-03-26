@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from eval import eval_vmfnet_uns
 from mmwhs_dataloader import MMWHS
 from models.compcsd import CompCSDMM
+from models.crosscompcsd import CrossCSD
 from composition.losses import ClusterLoss
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.model_selection import KFold
@@ -34,8 +35,8 @@ def get_args():
     parser.add_argument('--seed', default=42, type=int,help='Seed to use for reproducing results') # --> their default was 14
     parser.add_argument('--bs', type= int, default=4, help='Number of inputs per batch')
     parser.add_argument('--cp', type=str, default='checkpoints/', help='The name of the checkpoints.')
-    parser.add_argument('--cps', type=str, default='checkpoints/test', help='The name of the checkpoints for source.')
-    parser.add_argument('--cpt', type=str, default='checkpoints/reconstruct_CT', help='The name of the checkpoints for target.')
+    parser.add_argument('--cps', type=str, default='checkpoints/single_MR', help='The name of the checkpoints for source.')
+    parser.add_argument('--cpt', type=str, default='checkpoints/single_CT', help='The name of the checkpoints for target.')
 
     parser.add_argument('--name', type=str, default='test_MM_KLD', help='The name of this train/test. Used when storing information.')
     parser.add_argument('-lr','--learning_rate', type=float, default='0.0001', help='The learning rate for model training')
@@ -48,29 +49,32 @@ def get_args():
     parser.add_argument('--data_dir_s',  type=str, default='../data/other/MR_withGT_proc/annotated/', help='The name of the checkpoints.')
     parser.add_argument('--k_folds', type= int, default=5, help='Cross validation')
     parser.add_argument('--pred', type=str, default='MYO', help='Segmentation task')
+    parser.add_argument('--with_kl_loss', action='store_true') 
+    parser.add_argument('--content_disc', action='store_true') 
+    parser.add_argument('--vc_num_seg', type=int,  default=2, help='Kernel/distributions amount as input for the segmentation model')
+    parser.add_argument('--init', type=str, default='pretrain', help='Initialization method') # pretrain (original), xavier, cross.
+    
 
     return parser.parse_args()
 
 
 def train_net(train_loader, val_loader, fold, device, args, len_train_data, num_classes):
-    best_score = 1000000
     dir_checkpoint = os.path.join(args.cp, args.name)
     save_dir = os.path.join(dir_checkpoint, f'fold_{fold}')
     os.makedirs(save_dir, exist_ok=True)
-    source_model_name = glob.glob(os.path.join(args.cps, f'fold_{fold}/*.pth'))[0]
 
     #Model selection and initialization
-    model = CompCSDMM(args, device, 1, num_classes, vMF_kappa=30, type_model = 'kldiv')
-    model.initialize(source_model_name)
+    model = CrossCSD(args, device, 1, num_classes, vMF_kappa=30)
     model.to(device)
 
     log_dir = os.path.join('logs', os.path.join(args.name, 'fold_{}'.format(fold)))
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=log_dir)
 
+    best_score = 0
+
     global_step = 0
     print("Training fold: ", fold)
-
 
     for epoch in range(args.epochs):
         model.train()
@@ -79,62 +83,34 @@ def train_net(train_loader, val_loader, fold, device, args, len_train_data, num_
             for img_s, label_s, img_t, label_t in train_loader:
                 img_s = img_s.to(device)
                 img_t = img_t.to(device)
+                label_s = label_s.to(device)
 
-                batch_loss_it = model.update(img_s, img_t, writer, global_step)
-                pbar.set_postfix(**{'loss (batch)': batch_loss_it})
+                losses = model.update(img_s, label_s, img_t)
+                pbar.set_postfix(**{'loss (batch)': losses["loss/source/batch_loss"]})
                 pbar.update(img_t.shape[0])
 
+                for key, value in losses.items():
+                    writer.add_scalar(f'{key}', value, global_step)
+
                 global_step += 1
-
-            #if (epoch + 1) > args.k1 and (epoch + 1) % args.k2 == 0:
-            # on which parameter are we going to choose the best model?? 
+    
+            
             if epoch % 5 == 0:
-                l1_val, clu_val, dice_score, imgs, rec, true_label, pred_label, L_visual_source, L_visual_target = eval_vmfnet_mm(model, val_loader, device)
-                val_score = l1_val + clu_val 
-             
-                model.scheduler.step(val_score)
-                writer.add_scalar('learning_rate', model.optimizer.param_groups[0]['lr'], epoch)
+                metrics_dict, images_dict, visuals_dict = eval_vmfnet_mm(model, val_loader, device)
 
-                writer.add_scalar('Val_metrics/l1_dist', l1_val, epoch)
-                writer.add_scalar('Val_metrics/cluster_loss', clu_val, epoch)
-                writer.add_scalar('Val_metrics/DSC', dice_score, epoch)
-                writer.add_scalar('Val_metrics/score', val_score, epoch)
+                for key, value in metrics_dict.items():
+                    writer.add_scalar(f'Val_metrics/{key}', value, epoch)
+                
+                for key, value in images_dict.items():
+                    writer.add_images(f'Val_images/{key}', value, epoch, dataformats='NCHW')
+                
+                for key, value in visuals_dict.items():
+                    for i in range(args.vc_num):
+                        writer.add_images(f'Val_visuals/{key}_{i+1}', value[:,i,:,:].unsqueeze(1), epoch, dataformats='NCHW')
 
-                writer.add_images('Val_images/image_true', imgs, epoch, dataformats='NCHW')
-                writer.add_images('Val_images/image_rec', rec, epoch, dataformats='NCHW')
-                writer.add_images('Val_images/label_true', true_label, epoch, dataformats='NCHW')
-                writer.add_images('Val_images/label_pred', pred_label, epoch, dataformats='NCHW')
-
-
-                writer.add_images('L_visuals_val/L_1_s', L_visual_source[:,0,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_2_s', L_visual_source[:,1,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_3_s', L_visual_source[:,2,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_4_s', L_visual_source[:,3,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_5_s', L_visual_source[:,4,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_6_s', L_visual_source[:,5,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_7_s', L_visual_source[:,6,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_8_s', L_visual_source[:,7,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_9_s', L_visual_source[:,8,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_10_s', L_visual_source[:,9,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_11_s', L_visual_source[:,10,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_12_s', L_visual_source[:,11,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-
-                writer.add_images('L_visuals_val/L_1_t', L_visual_target[:,0,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_2_t', L_visual_target[:,1,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_3_t', L_visual_target[:,2,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_4_t', L_visual_target[:,3,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_5_t', L_visual_target[:,4,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_6_t', L_visual_target[:,5,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_7_t', L_visual_target[:,6,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_8_t', L_visual_target[:,7,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_9_t', L_visual_target[:,8,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_10_t', L_visual_target[:,9,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_11_t', L_visual_target[:,10,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-                writer.add_images('L_visuals_val/L_12_t', L_visual_target[:,11,:,:].unsqueeze(1), epoch, dataformats='NCHW')
-
-
-                if val_score < best_score:
-                    best_score = val_score
+                #on which parameter are we going to choose the best model??  --> For now cheating
+                if metrics_dict["DSC_Target"] > best_score:
+                    best_score = metrics_dict["DSC_Target"]
                     print("Epoch checkpoint")
 
                     print(f"--- Remove old model before saving new one ---")
@@ -148,7 +124,7 @@ def train_net(train_loader, val_loader, fold, device, args, len_train_data, num_
                         except OSError as e:
                             print(f"Error deleting file {file_path}: {e}")
                     
-                    torch.save(model.state_dict(), os.path.join(save_dir, f'CP_epoch_{epoch}_recloss_{val_score}.pth'))
+                    torch.save(model.state_dict(), os.path.join(save_dir, f'CP_epoch_{epoch}_DSC_T_{metrics_dict["DSC_Target"]}.pth'))
                     logging.info('Checkpoint saved !')
 
 
@@ -160,9 +136,15 @@ def main(args):
     pl.seed_everything(args.seed)
 
     if args.pred == "MYO":
+        print("MYO prediction")
         labels = [1, 0, 0, 0, 0, 0, 0]
         num_classes = 2
+    elif args.pred =="three":
+        print("three")
+        labels = [1, 0, 2, 0, 3, 0, 0] # 2 is LVC and 3 is RVC
+        num_classes = 4
     else:
+        print("ALL")
         labels = [1, 2, 3, 4, 5, 6, 7]
         num_classes = 8
 
@@ -185,6 +167,8 @@ def main(args):
 
         train_net(train_loader, val_loader, fold, device, args, len_train_data, num_classes) 
         fold += 1
+        print("For now one fold")
+        break
 
 
 
