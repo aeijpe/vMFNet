@@ -6,7 +6,7 @@ import torch
 
 
 class Segmentor(nn.Module):
-    def __init__(self, num_classes, vc_num_seg=2, layer=8):
+    def __init__(self, num_classes, vc_num_seg=12, layer=8):
         super(Segmentor, self).__init__()
         self.num_classes = num_classes
         self.layer = layer

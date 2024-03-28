@@ -5,7 +5,7 @@ import random
 import itertools
 
 from torch.utils.data import Dataset
-from monai.transforms import Compose, LoadImage, MapLabelValue
+from monai.transforms import Compose, LoadImage, MapLabelValue, ScaleIntensity
 from torchvision.transforms import Normalize
 
 
@@ -33,12 +33,6 @@ class MMWHS(Dataset):
     self.target_size = len(self.images_target)
     self.dataset_size = max(self.source_size, self.target_size)
 
-    if self.target_size is not self.source_size:
-      print("something is wrong here")
-      print(self.target_size)
-      print(self.source_size)
-
-
     self.transforms_seg = Compose(
             [
               LoadImage(),
@@ -49,17 +43,32 @@ class MMWHS(Dataset):
     self.transform_img = Compose(
             [
               LoadImage(),
+              ScaleIntensity(),
               #Normalize(mean=[0.5], std=[0.5])
             ])
 
 
   def __getitem__(self, index):
-    
-    image_s = self.transform_img(self.images_source[index])
-    label_s = self.transforms_seg(self.labels_source[index])
-    
-    image_t = self.transform_img(self.images_target[index])
-    label_t = self.transforms_seg(self.labels_target[index])
+    if self.source_size > self.target_size:
+      random_index = random.randint(0, self.target_size - 1)
+      #image_s = LoadImage()(self.images_source[index])
+      image_s = self.transform_img(self.images_source[index])
+      label_s = self.transforms_seg(self.labels_source[index])
+      #image_t = LoadImage()(self.images_target[random_index])
+      image_t = self.transform_img(self.images_target[random_index])
+      label_t = self.transforms_seg(self.labels_target[random_index])
+    elif self.target_size > self.source_size:
+      random_index = random.randint(0, self.source_size - 1)
+      image_s = self.transform_img(self.images_source[random_index])
+      label_s = self.transforms_seg(self.labels_source[random_index])
+      image_t = self.transform_img(self.images_target[index])
+      label_t = self.transforms_seg(self.labels_target[index])
+    else:
+      image_s = self.transform_img(self.images_source[index])
+      label_s = self.transforms_seg(self.labels_source[index])
+      
+      image_t = self.transform_img(self.images_target[index])
+      label_t = self.transforms_seg(self.labels_target[index])
   
     return image_s, label_s, image_t, label_t
 

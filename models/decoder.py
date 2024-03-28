@@ -9,6 +9,8 @@ class DoubleConv(nn.Module):
         super().__init__()
         if not mid_channels:
             mid_channels = out_channels
+        
+       
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
             # nn.BatchNorm2d(mid_channels),
@@ -29,6 +31,7 @@ class Decoder(nn.Module):
         self.anatomy_out_channels = 0
         self.layer = layer
 
+      
         self.up2 = deconv_bn_relu(256, 128, kernel_size=4, stride=2, padding=1)
         self.double_conv1 = DoubleConv(128 + self.anatomy_out_channels, 128)
         self.up3 = nn.ConvTranspose2d(128+self.anatomy_out_channels, 128+self.anatomy_out_channels, kernel_size=2, stride=2)

@@ -53,6 +53,7 @@ def get_args():
     parser.add_argument('--content_disc', action='store_true') 
     parser.add_argument('--vc_num_seg', type=int,  default=2, help='Kernel/distributions amount as input for the segmentation model')
     parser.add_argument('--init', type=str, default='pretrain', help='Initialization method') # pretrain (original), xavier, cross.
+    parser.add_argument('--norm', type=str, default="Batch")
     
 
     return parser.parse_args()

@@ -7,15 +7,17 @@ import time
 from models.unet_model import *
 
 class Encoder(nn.Module):
-    def __init__(self, num_output_channels):
+    def __init__(self, num_output_channels, norm="Batch"):
         super(Encoder, self).__init__()
         """
         Build an encoder to extract anatomical information from the image.
         """
         self.num_output_channels = num_output_channels
 
-        self.unet = UNet(n_classes=self.num_output_channels)
+        self.unet = UNet(n_classes=self.num_output_channels, norm=norm)
 
     def forward(self, x):
         out = self.unet(x)
         return out
+    
+  
