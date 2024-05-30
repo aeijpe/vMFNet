@@ -16,7 +16,7 @@ class DoubleConv(nn.Module):
             # nn.BatchNorm2d(mid_channels),
             # nn.ReLU(inplace=True),
             nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
-            # nn.BatchNorm2d(out_channels)
+            # nn.BatchNorm2d(out_channels),
             # nn.ReLU(inplace=True)
         )
 
@@ -59,7 +59,8 @@ class Decoder(nn.Module):
             out = self.up4(out)
             out = self.double_conv4(out)
         else:
-            raise (RuntimeError("No defined layers in segmentor!"))
+            out = self.double_conv3(features)
+            out = self.double_conv4(out)
 
         out = self.outc(out)
         return out

@@ -9,16 +9,16 @@ from monai.transforms import Compose, LoadImage, MapLabelValue, ScaleIntensityd,
 from torchvision.transforms import Normalize
 
 
-class MMWHS(Dataset):
+class CHAOS(Dataset):
   def __init__(self, args, labels, fold):
     self.data_dirs = args.data_dir_s # source data
     self.data_dirt = args.data_dir_t # target data
     self.target_labels = labels
 
-    self.all_source_images = sorted(glob.glob(os.path.join(self.data_dirs, "images/case_10*")))
-    self.all_source_labels = sorted(glob.glob(os.path.join(self.data_dirs, "labels/case_10*")))
-    self.all_target_images = sorted(glob.glob(os.path.join(self.data_dirt, "images/case_10*")))
-    self.all_target_labels = sorted(glob.glob(os.path.join(self.data_dirt, "labels/case_10*")))
+    self.all_source_images = sorted(glob.glob(os.path.join(self.data_dirs, "images/case_*")))
+    self.all_source_labels = sorted(glob.glob(os.path.join(self.data_dirs, "labels/case_*")))
+    self.all_target_images = sorted(glob.glob(os.path.join(self.data_dirt, "images/case_*")))
+    self.all_target_labels = sorted(glob.glob(os.path.join(self.data_dirt, "labels/case_*")))
 
     images_source = [glob.glob(self.all_source_images[idx]+ "/*.nii.gz") for idx in fold]
     self.images_source = sorted(list(itertools.chain.from_iterable(images_source)))
@@ -37,8 +37,7 @@ class MMWHS(Dataset):
     self.transforms_seg = Compose(
             [
               LoadImage(),
-              MapLabelValue(orig_labels=[1, 2, 3, 4, 5], target_labels=self.target_labels),
-              MapLabelValue(orig_labels=[421], target_labels=[0])
+              MapLabelValue(orig_labels=[1, 2, 3, 4], target_labels=self.target_labels),
             ])
   
     self.transform_img = Compose(
@@ -69,19 +68,19 @@ class MMWHS(Dataset):
       image_t = self.transform_img(self.images_target[index])
       label_t = self.transforms_seg(self.labels_target[index])
   
-    return image_s, label_s, image_t, label_t
+    return image_s.unsqueeze(0), label_s.unsqueeze(0), image_t.unsqueeze(0), label_t.unsqueeze(0)
 
   def __len__(self):
     return self.dataset_size
   
 
-class MMWHS_single(Dataset):
-  def __init__(self, data_dir, fold, labels = [1, 0, 0, 0, 0]):
+class CHAOS_single(Dataset):
+  def __init__(self, data_dir, fold, labels = [1, 0, 0, 0]):
     self.data_dir = data_dir
     self.target_labels = labels
 
-    self.all_images = sorted(glob.glob(os.path.join(self.data_dir, "images/case_10*")))
-    self.all_labels = sorted(glob.glob(os.path.join(self.data_dir, "labels/case_10*")))
+    self.all_images = sorted(glob.glob(os.path.join(self.data_dir, "images/case_*")))
+    self.all_labels = sorted(glob.glob(os.path.join(self.data_dir, "labels/case_*")))
 
     images = [glob.glob(self.all_images[idx]+ "/*.nii.gz") for idx in fold]
     self.images = sorted(list(itertools.chain.from_iterable(images)))
@@ -93,9 +92,8 @@ class MMWHS_single(Dataset):
 
     self.transform_dict = Compose(
         [
-            LoadImaged(keys=["img", "seg"]),
-            MapLabelValued(keys=["seg"], orig_labels=[1, 2, 3, 4, 5], target_labels=self.target_labels),
-            MapLabelValued(keys=["seg"], orig_labels=[421], target_labels=[0]),
+            LoadImaged(keys=["img", "seg"],),
+            MapLabelValued(keys=["seg"], orig_labels=[1, 2, 3, 4], target_labels=self.target_labels)
         ]
     )
         
@@ -104,13 +102,11 @@ class MMWHS_single(Dataset):
 
 
   def __getitem__(self, index):
-    # image = self.transform_img(self.test_images[index])
-    # label = self.transforms_seg(self.test_labels[index])
     data_point = self.transform_dict(self.data[index])
     image = data_point["img"]
     label = data_point["seg"] 
 
-    return image, label
+    return image.unsqueeze(0), label.unsqueeze(0)
 
   def __len__(self):
     return self.dataset_size

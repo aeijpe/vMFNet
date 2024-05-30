@@ -1,13 +1,13 @@
 """ Full assembly of the parts to form the complete network """
 
 import torch.nn.functional as F
-
 from models.unet_parts import *
+from monai.networks.nets import UNet
 
 ###################################### maybe delete some skips
-class UNet(nn.Module):
+class UNetNorm(nn.Module):
     def __init__(self, n_classes, norm="Batch", n_channels=1, bilinear=True):
-        super(UNet, self).__init__()
+        super(UNetNorm, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
@@ -38,3 +38,18 @@ class UNet(nn.Module):
         logits = self.outc(y4)
         return [logits, x1, x2, x3, x4, x5, y1, y2, y3, y4]
         #Layer   # 0     1    2   3   4  5   6   7   8   9
+    
+class CustomUNet(UNet):
+    def __init__(self, *args, **kwargs):
+        super(CustomUNet, self).__init__(*args, **kwargs)
+        # We skip the last skip connection and upsampling layers
+        self.seq = nn.Sequential(
+            self.model[0],
+            self.model[1].submodule[:]
+        )
+
+    def forward(self, x):
+        out = self.seq(x)
+        return [0, 0, 0, 0, 0, 0, 0, 0, out, 0]
+    
+    

@@ -6,8 +6,8 @@ def getVmfKernels(dict_dir, device):
 	vc = np.load(dict_dir, allow_pickle=True)
 	vc = vc[:, :, np.newaxis, np.newaxis]
 	vc = torch.from_numpy(vc).type(torch.FloatTensor)
-	if device:
-		vc = vc.to(device)
+	# if device:
+	# 	vc = vc.to(device)
 	return vc
 
 def myresize(img, dim, tp):

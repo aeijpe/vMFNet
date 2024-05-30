@@ -1,20 +1,24 @@
 import torch
+import torch.nn as nn
+import torch.optim as optim
 import os
 import argparse
 from tqdm import tqdm
 import logging
 from torch.utils.data import DataLoader
-from eval import eval_vmfnet_mm
 from mmwhs_dataloader import MMWHS
-
-from models.crosscompcsd import CrossCSD
-import pytorch_lightning as pl
+from chaos_dataloader import CHAOS
+from models.crosscompcsd import CrossCSD, CrossCSDFirst
 from torch.utils.tensorboard import SummaryWriter
-
+from sklearn.model_selection import KFold
+import pytorch_lightning as pl
 import glob
-
 import numpy as np
-from metrics import dice
+
+from eval import eval_vmfnet_mm
+from utils import *
+import random
+
 
 
 
@@ -25,38 +29,58 @@ def get_args():
         "   with [options]:"
     )
     parser = argparse.ArgumentParser(description=usage_text)
-    #testing details
+    #training details
+    parser.add_argument('--epochs', type= int, default=300, help='Number of epochs')
     parser.add_argument('--seed', default=42, type=int,help='Seed to use for reproducing results') # --> their default was 14
     parser.add_argument('--bs', type= int, default=4, help='Number of inputs per batch')
     parser.add_argument('--cp', type=str, default='checkpoints/', help='The name of the checkpoints.')
 
+
     parser.add_argument('--name', type=str, default='test_MM_KLD', help='The name of this train/test. Used when storing information.')
     parser.add_argument('-lr','--learning_rate', type=float, default='0.0001', help='The learning rate for model training')
     parser.add_argument('-wi','--weight_init', type=str, default="xavier", help='Weight initialization method, or path to weights file (for fine-tuning or continuing training)')
-    parser.add_argument('--k1', type=int,  default=40, help='When the learning rate starts decaying')
-    parser.add_argument('--k2', type=int,  default=4, help='Check decay learning')
+    parser.add_argument('--k2', type=int,  default=10, help='Check decay learning')
     parser.add_argument('--layer', type=int,  default=8, help='layer from which the deepf eatures are obtained')
     parser.add_argument('--vc_num', type=int,  default=12, help='Kernel/distributions amount')
-    parser.add_argument('--data_dir_t',  type=str, default='../data/other/CT_withGT_proc/annotated/', help='The name of the checkpoints.')
-    parser.add_argument('--data_dir_s',  type=str, default='../data/other/MR_withGT_proc/annotated/', help='The name of the checkpoints.')
+    parser.add_argument('--data_dir_t',  type=str, default='../data/other/CT_withGT_proc/', help='The name of the data dir.')
+    parser.add_argument('--data_dir_s',  type=str, default='../data/other/MR_withGT_proc/', help='The name of the data dir.')
     parser.add_argument('--k_folds', type= int, default=5, help='Cross validation')
     parser.add_argument('--pred', type=str, default='MYO', help='Segmentation task')
-    parser.add_argument('--with_kl_loss', action='store_true') 
-    parser.add_argument('--content_disc', action='store_true') 
+   
+    parser.add_argument('--vc_num_seg', type=int,  default=12, help='Kernel/distributions amount as input for the segmentation model')
     parser.add_argument('--init', type=str, default='pretrain', help='Initialization method') # pretrain (original), xavier, cross.
+    parser.add_argument('--norm', type=str, default="Batch")
+    parser.add_argument('--encoder_type', type=str, default="unet")
+
+    parser.add_argument('--true_clu_loss', action='store_true')  # default is optimization with fake loss
+    parser.add_argument('--pretrain', action='store_true')  # default is optimization with fake loss
+
+    parser.add_argument('--data_type', type=str, default="MMWHS") #MMWHS, RetinalVessel
     
+
     return parser.parse_args()
 
 
-def test(model_file, log_dir, data_loader, device, num_classes, cp_dir):
-    print("Loading model")
-    model = CrossCSD(args, device, 1, num_classes, vMF_kappa=30)
+def test_net(save_dir, val_loader, writer, device, num_classes, fold):
+    pretrained_model = glob.glob(os.path.join(save_dir, "*.pth"))
+
+    if pretrained_model == []:
+        print("no pretrained model found!")
+        quit()
+    else:
+        model_file = pretrained_model[0]
+
+    print("Loading model: ", model_file)
+    model = CrossCSD(args, device, 1, num_classes, vMF_kappa=30, fold_nr=fold)
     model.to(device)
     model.resume(model_file)
     model.eval()
 
-    writer = SummaryWriter(log_dir=log_dir)
-    metrics_dict, images_dict, visuals_dict = eval_vmfnet_mm(model, data_loader, device)
+    metrics_dict, images_dict, visuals_dict, lpips_metric = eval_vmfnet_mm(model, val_loader, device)
+
+    writer.add_scalar(f'Test_metrics/lpips_target', lpips_metric, 0)
+    new_metric = (1-lpips_metric) + metrics_dict["Target/DSC_fake"]
+    writer.add_scalar(f'Val_metrics/lpips_dscf', new_metric , 0)
 
     for key, value in metrics_dict.items():
         writer.add_scalar(f'Test_metrics/{key}', value, 0)
@@ -68,51 +92,81 @@ def test(model_file, log_dir, data_loader, device, num_classes, cp_dir):
         for i in range(args.vc_num):
             writer.add_images(f'Test_visuals/{key}_{i+1}', value[:,i,:,:].unsqueeze(1), 0, dataformats='NCHW')
 
-    return metrics_dict["DSC_Target"]
-    
-    
+    return metrics_dict
 
 
+def test_k_folds(args, labels, num_classes, device, dataset_type):
+    cases = range(0,20)
+    kf = KFold(n_splits=args.k_folds, shuffle=True)
+    fold = 0
+    dsc_scores_BG = []
+    dsc_scores = []
+    dsc_scores_prev = []
+    assd_scores = []
+
+    # for fold_train, fold_test_val in kf.split(cases):
+    for fold_train_val, fold_test in kf.split(cases):
+        dir_checkpoint = os.path.join(args.cp, args.name)
+        save_dir = os.path.join(dir_checkpoint, f'fold_{fold}')
+        os.makedirs(save_dir, exist_ok=True)
+        log_dir = os.path.join('logs', os.path.join(args.name, 'fold_{}'.format(fold)))
+        os.makedirs(log_dir, exist_ok=True)
+        writer = SummaryWriter(log_dir=log_dir)
+    
+        print("loading test data")
+        dataset_test = dataset_type(args, labels, fold_test) 
+        test_loader = DataLoader(dataset_test, batch_size=1, num_workers=4)
+        metrics_fold = test_net(save_dir, test_loader, writer, device, num_classes, fold)
+        fold += 1
+
+        dsc_scores.append(metrics_fold['Target/DSC'].cpu())
+        dsc_scores_BG.append(metrics_fold['Target/DSC_0'].cpu())
+        dsc_scores_prev.append(metrics_fold['Target/DSC_1'].cpu())
+        assd_scores.append(metrics_fold['Target/assd'])
+
+    dsc_scores_BG = np.array(dsc_scores_BG)
+    mean_dsc_BG = np.mean(dsc_scores_BG)
+    std_dsc_BG = np.std(dsc_scores_BG)
+    print("FINAL RESULTS BG")
+    print("DSC_0: ", dsc_scores_BG)
+    print(f"Mean DSC_0: {mean_dsc_BG}, Std DSC_0: {std_dsc_BG}")
+
+    dsc_scores = np.array(dsc_scores)
+    mean_dsc = np.mean(dsc_scores)
+    std_dsc = np.std(dsc_scores)
+    print("FINAL RESULTS TRUE DSC")
+    print("DSC_1: ", dsc_scores)
+    print(f"Mean DSC_1: {mean_dsc}, Std DSC_1: {std_dsc}")
+
+    dsc_scores_prev = np.array(dsc_scores_prev)
+    mean_dsc_pre = np.mean(dsc_scores_prev)
+    std_dsc_pre = np.std(dsc_scores_prev)
+    print("FINAL RESULTS DSC WITHOUT ADJUSTMENT")
+    print("DSC_1: ", dsc_scores_prev)
+    print(f"Mean DSC_1: {mean_dsc_pre}, Std DSC_1: {std_dsc_pre}")
+
+    assd_scores = np.array(assd_scores)
+    mean_assd = np.mean(assd_scores)
+    std_assd = np.std(assd_scores)
+    print("ASSD: ", assd_scores)
+    print(f"Mean ASSD: {mean_assd}, Std ASSD: {std_assd}")
+        
 def main(args):
-    pl.seed_everything(args.seed)
+    set_seed(args.seed)
 
-    if args.pred == "MYO":
-        labels = [1, 0, 0, 0, 0, 0, 0]
-        num_classes = 2
+    labels, num_classes = get_labels(args.pred)
+    # MMWHS Dataset
+    if args.data_type == "MMWHS":
+        dataset_type = MMWHS
+    elif args.data_type == "chaos":
+        dataset_type = CHAOS
     else:
-        labels = [1, 2, 3, 4, 5, 6, 7]
-        num_classes = 8
-
-    test_fold = [18, 19]
-
-    dataset_test = MMWHS(args, labels, test_fold)
-    test_loader = DataLoader(dataset_test, batch_size=args.bs, drop_last=True, num_workers=4)
+        raise ValueError(f"Data type {args.data_type} not supported")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dir_checkpoints = os.path.join(args.cp, args.name)
-    log_dir = os.path.join("logs", args.name)
-    pretrained_filenames = glob.glob(os.path.join(dir_checkpoints, "fold_*/*.pth"))
-    
-    dsc_scores = []
-    pretrained_found = False
+    print(device)
 
-    for it, model_file in enumerate(pretrained_filenames):
-        print(f"Testing model {it+1}/{len(pretrained_filenames)}")
-        log_dir_fold = os.path.join(log_dir, f"fold_{it}")
-        print("log_dir: ", log_dir_fold)
-        dsc = test(model_file, log_dir_fold, test_loader, device, num_classes, dir_checkpoints)
-        dsc_scores.append(dsc)
-        pretrained_found = True
-
-    if pretrained_found:
-        dsc_scores = np.array(dsc_scores)
-        mean_dsc = np.mean(dsc_scores)
-        std_dsc = np.std(dsc_scores)
-        print("FINAL RESULTS")
-        print(f"Mean DSC: {mean_dsc}, Std DSC: {std_dsc}")
-    else:
-        print("No pretrained models found")
-
+    test_k_folds(args, labels, num_classes, device, dataset_type)
 
 
 
