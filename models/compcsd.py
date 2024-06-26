@@ -1,12 +1,8 @@
 # Copyright (c) 2022 vios-s
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-import torchvision.transforms.functional as TVF
-from torchvision.transforms import InterpolationMode
-import cv2
-import random
+
 from models.encoder import *
 from models.decoder import *
 from models.segmentor import *
@@ -15,8 +11,6 @@ from models.weight_init import *
 from composition.model import *
 from composition.helpers import *
 
-from composition.losses import ClusterLoss
-from losses import *
 
 class CompCSD(nn.Module):
     def __init__(self, device, image_channels, layer, vc_numbers, num_classes, z_length, vMF_kappa, init):

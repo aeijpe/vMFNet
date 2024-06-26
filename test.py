@@ -1,7 +1,6 @@
 import torch
 import os
 import argparse
-from tqdm import tqdm
 import logging
 from torch.utils.data import DataLoader
 from eval import test_vmfnet
