@@ -133,7 +133,8 @@ def eval_vmfnet_mm(model, loader, device):
                 n_val_dsc -= 1
             else:
                 true_dsc += metrics_dict["Target/DSC"]
-                fake_dsc += metrics_dict["Target/DSC_fake"]
+            
+            fake_dsc += metrics_dict["Target/DSC_fake"]
 
 
             img_t3 = torch.cat((img_t, img_t, img_t), dim=1)
@@ -157,7 +158,7 @@ def eval_vmfnet_mm(model, loader, device):
         metrics_dict_total["Target/assd"] = true_assd / n_val_assd
 
     metrics_dict_total["Target/DSC"] = true_dsc / n_val_dsc
-    metrics_dict_total["Target/DSC_fake"] = fake_dsc / n_val_dsc
+    metrics_dict_total["Target/DSC_fake"] = fake_dsc / n_val
     
     return metrics_dict_total, image_dict_show, visual_dict_show, torch.mean(torch.stack(lpips_list_target))
 
