@@ -1,11 +1,10 @@
+# Copyright (c) 2022 vios-s
 import  torch
 import torch.nn as nn
 from torch.autograd import Variable
 import functools
 from torch.optim import lr_scheduler
 import torch.nn.functional as F
-
-
 
 class DiscriminatorC(nn.Module):
   def __init__(self, input_channels=64):

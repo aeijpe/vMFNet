@@ -1,3 +1,4 @@
+# Copyright (c) 2022 vios-s
 """ Full assembly of the parts to form the complete network """
 
 import torch.nn.functional as F

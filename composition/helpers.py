@@ -1,3 +1,4 @@
+# Copyright (c) 2022 vios-s
 import torch
 import cv2
 from composition.vMFMM import *

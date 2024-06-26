@@ -1,4 +1,4 @@
-
+# Copyright (c) 2022 vios-s
 """ Parts of the U-Net model """
 
 import torch

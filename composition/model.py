@@ -1,3 +1,4 @@
+# Copyright (c) 2022 vios-s
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

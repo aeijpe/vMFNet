@@ -5,10 +5,8 @@ from tqdm import tqdm
 import logging
 from torch.utils.data import DataLoader
 from eval import test_vmfnet
-from mmwhs_dataloader import MMWHS_single
-from chaos_dataloader import CHAOS_single
+from dataloader import CHAOS_single, MMWHS_single
 from models.compcsd import CompCSD
-import pytorch_lightning as pl
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.model_selection import KFold
 
@@ -27,7 +25,7 @@ def get_args():
     )
     parser = argparse.ArgumentParser(description=usage_text)
     #training details
-    parser.add_argument('-e','--epochs', type= int, default=100, help='Number of epochs')
+    parser.add_argument('-e','--epochs', type= int, default=200, help='Number of epochs')
     parser.add_argument('--seed', default=42, type=int,help='Seed to use for reproducing results') # --> their default was 14
     parser.add_argument('--bs', type= int, default=1, help='Number of inputs per batch')
     parser.add_argument('-c', '--cp', type=str, default='checkpoints', help='The name of the checkpoints.')
@@ -48,9 +46,9 @@ def get_args():
     return parser.parse_args()
 
 
-def test(save_dir, data_loader, writer, device, num_classes, fold):
+def test(save_dir, data_loader, writer, device, num_classes):
+    # get pretrained model
     pretrained_model = glob.glob(os.path.join(save_dir, "*.pth"))
-
     if pretrained_model == []:
         print("no pretrained model found!")
         quit()
@@ -65,8 +63,10 @@ def test(save_dir, data_loader, writer, device, num_classes, fold):
     model.resume(model_file)
     model.eval()
 
+    # Test trained model
     dsc_classes, assd, true_dsc, imgs, rec, test_true, test_pred, L_visuals = test_vmfnet(model, data_loader, device)
     
+    # TB logging
     for i, item in enumerate(dsc_classes):
             writer.add_scalar(f'Test_metrics/dice_class_{i}', item, 0)
 
@@ -78,20 +78,18 @@ def test(save_dir, data_loader, writer, device, num_classes, fold):
     for i in range(10):
         writer.add_images(f'L_visuals/L_{i}', L_visuals[:,i,:,:].unsqueeze(1), 0, dataformats='NCHW')
 
-    return dsc_classes[0], dsc_classes[1], assd, true_dsc
+    # return results
+    return dsc_classes[0], assd, true_dsc
     
 def test_k_folds(args, labels, num_classes, device, dataset_type):
     cases = range(0,20)
     kf = KFold(n_splits=args.k_folds, shuffle=True)
     fold = 0
     dsc_scores_BG = []
-    dsc_scores = []
     assd_scores = []
     true_dsc_scores = []
 
     print("TASK: ", args.pred)
-
-    # for fold_train, fold_test_val in kf.split(cases):
     for fold_train_val, fold_test in kf.split(cases):
         print("fold")
         dir_checkpoint = os.path.join(args.cp, args.name)
@@ -101,35 +99,28 @@ def test_k_folds(args, labels, num_classes, device, dataset_type):
         os.makedirs(log_dir, exist_ok=True)
         writer = SummaryWriter(log_dir=log_dir)
     
-        print("loading test data")
+        print("Loading test data")
         dataset_test = dataset_type(args.data_dir, fold_test, labels) 
         test_loader = DataLoader(dataset_test, batch_size=1, num_workers=4)
-        dsc_0, dsc_1, assd, true_dsc = test(save_dir, test_loader, writer, device, num_classes, fold)
+        dsc_0, assd, true_dsc = test(save_dir, test_loader, writer, device, num_classes)
         fold += 1
 
-        dsc_scores.append(dsc_1)
         dsc_scores_BG.append(dsc_0)
         assd_scores.append(assd)
         true_dsc_scores.append(true_dsc)
 
+    # Print test results
     dsc_scores_BG = np.array(dsc_scores_BG)
     mean_dsc_BG = np.mean(dsc_scores_BG)
     std_dsc_BG = np.std(dsc_scores_BG)
-    print("FINAL RESULTS BG")
+    print("FINAL RESULTS Back Ground")
     print("DSC_0: ", dsc_scores_BG)
     print(f"Mean DSC_0: {mean_dsc_BG}, Std DSC_0: {std_dsc_BG}")
-
-    dsc_scores = np.array(dsc_scores)
-    mean_dsc = np.mean(dsc_scores)
-    std_dsc = np.std(dsc_scores)
-    print("FINAL RESULTS DSC")
-    print("DSC_1: ", dsc_scores)
-    print(f"Mean DSC_1: {mean_dsc}, Std DSC_1: {std_dsc}")
 
     true_dsc_scores = np.array(true_dsc_scores)
     mean_true_dsc = np.mean(true_dsc_scores)
     std_true_dsc = np.std(true_dsc_scores)
-    print("FINAL RESULTS TRUE DSC")
+    print("FINAL RESULTS TRUE DSC for class")
     print("DSC_1: ", true_dsc_scores)
     print(f"Mean DSC_1: {mean_true_dsc}, Std DSC_1: {std_true_dsc}")
 
@@ -142,12 +133,12 @@ def test_k_folds(args, labels, num_classes, device, dataset_type):
 
 def main(args):
     set_seed(args.seed)
-
     labels, num_classes = get_labels(args.pred)
-    # MMWHS Dataset
+
+    # Get dataset
     if args.data_type == "MMWHS":
         dataset_type = MMWHS_single
-    elif args.data_type == "chaos":
+    elif args.data_type == "CHAOS":
         dataset_type = CHAOS_single
     else:
         raise ValueError(f"Data type {args.data_type} not supported")
@@ -155,6 +146,7 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
 
+    # Test all models (i.e., for all folds)
     test_k_folds(args, labels, num_classes, device, dataset_type)
 
 

@@ -1,6 +1,5 @@
+# Copyright (c) 2022 vios-s
 import torch
-
-import os
 import sys
 
 

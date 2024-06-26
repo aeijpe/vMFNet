@@ -1,3 +1,5 @@
+# Copyright (c) 2022 vios-s
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,19 +9,16 @@ from tqdm import tqdm
 import logging
 from torch.utils.data import DataLoader
 from eval import eval_vmfnet
-from mmwhs_dataloader import MMWHS_single
-from chaos_dataloader import CHAOS_single
+from dataloader import CHAOS_single, MMWHS_single
 from models.compcsd import CompCSD
 from composition.losses import ClusterLoss
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.model_selection import KFold
-import pytorch_lightning as pl
 import torch.nn.functional as F
 import glob
 import numpy as np
 from utils import *
 
-from losses import DiceLossMC
 from monai.losses import DiceLoss
 
 
@@ -56,6 +55,7 @@ def get_args():
     return parser.parse_args()
 
 
+# Train function per fold
 def train_net(train_loader, val_loader, fold, device, args, num_classes, len_train_data):
     dir_checkpoint = os.path.join(args.cp, args.name)
 
@@ -80,8 +80,8 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
     global_step = 0
     best_val_score = 0
     print("Training fold: ", fold)
-    shape_is = True
 
+    # Training loop
     for epoch in range(args.epochs):
         model.train()
         with tqdm(total=len_train_data, desc=f'Epoch {epoch + 1}/{args.epochs}', unit='img') as pbar:
@@ -90,21 +90,23 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
                 img_s = img_s.to(device)
                 label_s = label_s.to(device)
 
+                # Forward pass
                 rec_s, pre_seg_s, features_s, kernels_s, L_visuals_s = model(img_s)
 
+                # Calculate losses
                 labels_oh = F.one_hot(label_s.long().squeeze(1), num_classes).permute(0, 3, 1, 2)
                 loss_dice_s = dice_loss(pre_seg_s, labels_oh) 
-
                 reco_loss_s = l1_distance(rec_s, img_s)
                 clu_loss_s = cluster_loss(features_s.detach(), kernels_s)
-
                 batch_loss_s = reco_loss_s + clu_loss_s  + loss_dice_s
     
+                # Optimize
                 optimizer.zero_grad()
                 batch_loss_s.backward()
                 nn.utils.clip_grad_value_(model.parameters(), 0.1)
                 optimizer.step()
 
+                # TB logging
                 writer.add_scalar('loss/batch_loss_s', batch_loss_s.item(), global_step)
                 writer.add_scalar('loss/reco_loss_s', reco_loss_s.item(), global_step)
                 writer.add_scalar('loss/loss_dice_s', loss_dice_s.item(), global_step)
@@ -119,10 +121,11 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
             if optimizer.param_groups[0]['lr'] <= 2e-8:
                 print('Converge')
 
-            #if (epoch + 1) > args.k1 and (epoch + 1) % args.k2 == 0:
+            # Validation step
             if epoch % 5 == 0:
                 dsc_classes, show_imgs, show_rec, show_true, show_pred, show_vis = eval_vmfnet(model, val_loader, device)
 
+                # TB logging
                 for i, item in enumerate(dsc_classes):
                     writer.add_scalar(f'Val_metrics/dice_class_{i}', item, epoch)
                 
@@ -137,7 +140,7 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
                 
                 scheduler.step(total_dsc)
 
-
+                # Save best model during training
                 if total_dsc > best_val_score:
                     best_val_score = total_dsc
                     print("Epoch checkpoint")
@@ -164,42 +167,37 @@ def train_net(train_loader, val_loader, fold, device, args, num_classes, len_tra
 
 
 def main(args):
-    pl.seed_everything(args.seed)
-
+    set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cases = range(0,20)
     kf = KFold(n_splits=args.k_folds, shuffle=True)
     fold = 0
 
     labels, num_classes = get_labels(args.pred)
-    # MMWHS Dataset
+
+    # Get Dataset
     if args.data_type == "MMWHS":
         dataset_type = MMWHS_single
-    elif args.data_type == "chaos":
+    elif args.data_type == "CHAOS":
         dataset_type = CHAOS_single
     else:
         raise ValueError(f"Data type {args.data_type} not supported")
     
+    # Cross-validation
     for fold_train, fold_val in kf.split(cases):
-        if fold < 3:
-            fold += 1
-            continue
-        print('Train fold:', fold_train)
-        print('Val fold:', fold_val)
         print("loading train data")
         dataset_train = dataset_type(args.data_dir, fold_train, labels)
-    
         train_loader = DataLoader(dataset_train, batch_size=args.bs, shuffle=True, num_workers=4)
+        
         print("loading val data")
         dataset_val = dataset_type(args.data_dir, fold_val, labels) 
         val_loader = DataLoader(dataset_val, batch_size=args.bs, drop_last=True, num_workers=4)
         len_train_data = dataset_train.__len__()
 
+        # Train for this fold
         train_net(train_loader, val_loader, fold, device, args, num_classes, len_train_data) 
         fold += 1
     
-
-
 
 
 if __name__ == '__main__':

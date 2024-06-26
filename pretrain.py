@@ -1,3 +1,5 @@
+# Copyright (c) 2022 vios-s
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -6,7 +8,7 @@ import argparse
 from tqdm import tqdm
 import logging
 from torch.utils.data import DataLoader
-from mmwhs_dataloader import MMWHS_single
+from dataloader import MMWHS_single
 
 import models
 from torch.utils.tensorboard import SummaryWriter

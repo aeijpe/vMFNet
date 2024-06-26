@@ -1,3 +1,4 @@
+# Copyright (c) 2022 vios-s
 import torch.nn as nn
 
 class ClusterLoss(nn.Module):
